@@ -1,66 +1,90 @@
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, EventRef, MarkdownView, TAbstractFile } from 'obsidian';
+import {
+  App,
+  Modal,
+  Notice,
+  Plugin,
+  PluginSettingTab,
+  Setting,
+  EventRef,
+  MarkdownView,
+  TFile,
+  TAbstractFile,
+} from 'obsidian';
 
-const illegalSymbols = ['*', '\\', '/', '<', '>', ':', '|', '?'];
+const stockIllegalSymbols = ['*', '\\', '/', '<', '>', ':', '|', '?'];
 
 interface LinePointer {
-	LineNumber: number;
-	Text: string;
+  LineNumber: number;
+  Text: string;
 }
 
 interface FilenameHeadingSyncPluginSettings {
-	numLinesToCheck: number;
-	ignoredFiles: { [key: string]: null };
+  numLinesToCheck: number;
+  userIllegalSymbols: string[];
+  ignoredFiles: { [key: string]: null };
 }
 
 const DEFAULT_SETTINGS: FilenameHeadingSyncPluginSettings = {
-	numLinesToCheck: 1,
-	ignoredFiles: {},
+  numLinesToCheck: 1,
+  userIllegalSymbols: [],
+  ignoredFiles: {},
 };
 
 export default class FilenameHeadingSyncPlugin extends Plugin {
-	settings: FilenameHeadingSyncPluginSettings;
+  settings: FilenameHeadingSyncPluginSettings;
 
-	async onload() {
-		await this.loadSettings();
+  async onload() {
+    await this.loadSettings();
 
-		this.registerEvent(
-			this.app.vault.on('rename', (file, oldPath) => this.handleSyncFilenameToHeading(file, oldPath)),
-		);
-		this.registerEvent(this.app.vault.on('modify', (file) => this.handleSyncHeadingToFile(file)));
-		this.registerEvent(
-			this.app.workspace.on('file-open', (file) => this.handleSyncFilenameToHeading(file, file.path)),
-		);
+    this.registerEvent(
+      this.app.vault.on('rename', (file, oldPath) =>
+        this.handleSyncFilenameToHeading(file, oldPath),
+      ),
+    );
+    this.registerEvent(
+      this.app.vault.on('modify', (file) => this.handleSyncHeadingToFile(file)),
+    );
+    this.registerEvent(
+      this.app.workspace.on('file-open', (file) =>
+        this.handleSyncFilenameToHeading(file, file.path),
+      ),
+    );
 
-		this.addSettingTab(new FilenameHeadingSyncSettingTab(this.app, this));
+    this.addSettingTab(new FilenameHeadingSyncSettingTab(this.app, this));
 
-		this.addCommand({
-			id: 'page-heading-sync-ignore-file',
-			name: 'Ignore current file',
-			checkCallback: (checking: boolean) => {
-				let leaf = this.app.workspace.activeLeaf;
-				if (leaf) {
-					if (!checking) {
-						this.settings.ignoredFiles[this.app.workspace.activeLeaf.view.file.path.trim()] = null;
-						this.saveSettings();
-					}
-					return true;
-				}
-				return false;
-			},
-		});
-	}
+    this.addCommand({
+      id: 'page-heading-sync-ignore-file',
+      name: 'Ignore current file',
+      checkCallback: (checking: boolean) => {
+        let leaf = this.app.workspace.activeLeaf;
+        if (leaf) {
+          if (!checking) {
+            this.settings.ignoredFiles[
+              this.app.workspace.getActiveFile().path
+            ] = null;
+            this.saveSettings();
+          }
+          return true;
+        }
+        return false;
+      },
+    });
+  }
 
-	handleSyncHeadingToFile(file: TAbstractFile) {
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+  handleSyncHeadingToFile(file: TAbstractFile) {
+    if (!(file instanceof TFile)) {
+      return;
+    }
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 
-		// if ignored, just bail
-		if (this.settings.ignoredFiles[file.path] !== undefined) {
-			return;
-		}
+    // if ignored, just bail
+    if (this.settings.ignoredFiles[file.path] !== undefined) {
+      return;
+    }
 
-		if (view === null) {
-			return;
-		}
+    const editor = view.sourceMode.cmEditor;
+    const doc = editor.getDoc();
+    const heading = this.findHeading(doc);
 
     // no heading found, nothing to do here
     if (heading == null) {
@@ -190,19 +214,19 @@ class FilenameHeadingSyncSettingTab extends PluginSettingTab {
         'If no header is found within the first few lines (set below), will insert a new one at the first line.',
     });
 
-		new Setting(containerEl)
-			.setName('Number of lines to check')
-			.setDesc('How many lines from top to check for a header')
-			.addSlider((slider) =>
-				slider
-					.setDynamicTooltip()
-					.setValue(this.plugin.settings.numLinesToCheck)
-					.setLimits(1, 25, 1)
-					.onChange(async (value) => {
-						this.plugin.settings.numLinesToCheck = value;
-						await this.plugin.saveSettings();
-					}),
-			);
+    new Setting(containerEl)
+      .setName('Number of lines to check')
+      .setDesc('How many lines from top to check for a header')
+      .addSlider((slider) =>
+        slider
+          .setDynamicTooltip()
+          .setValue(this.plugin.settings.numLinesToCheck)
+          .setLimits(1, 25, 1)
+          .onChange(async (value) => {
+            this.plugin.settings.numLinesToCheck = value;
+            await this.plugin.saveSettings();
+          }),
+      );
 
     new Setting(containerEl)
       .setName('Custom Illegal Charaters/Strings')
